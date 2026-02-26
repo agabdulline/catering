@@ -4,6 +4,7 @@ class FramerCMS {
         this.baseUrl = baseUrl.endsWith('/') ? baseUrl : baseUrl + '/';
         this.useMockData = false;
         this._boxesCache = null;      // единый кеш боксов на сессию
+        this._eventsCache = null;     // единый кеш ивентов на сессию
         this._initInProgress = false; // защита от параллельных autoInit
     }
 
@@ -191,6 +192,42 @@ class FramerCMS {
         }
     }
 
+    // Тестовые данные мероприятий
+    getMockEvents() {
+        return [
+            {
+                id: 1,
+                upper: "Конференция INTRA-TECH",
+                quantity: 400,
+                photo: "https://images.unsplash.com/photo-1555244162-803834f70033?w=600"
+            },
+            {
+                id: 2,
+                upper: "Корпоратив SBER 2024",
+                quantity: 250,
+                photo: "https://images.unsplash.com/photo-1530103862676-de8c9debad1d?w=600"
+            },
+            {
+                id: 3,
+                upper: "Свадьба Ивановых",
+                quantity: 120,
+                photo: "https://images.unsplash.com/photo-1519167758481-83f550bb49b3?w=600"
+            },
+            {
+                id: 4,
+                upper: "Открытие офиса Яндекс",
+                quantity: 80,
+                photo: "https://images.unsplash.com/photo-1540575467063-178a50c2df87?w=600"
+            },
+            {
+                id: 5,
+                upper: "Банкет ВТБ",
+                quantity: 300,
+                photo: "https://images.unsplash.com/photo-1414235077428-338989a2e8c0?w=600"
+            }
+        ];
+    }
+
     // Генерация slug из названия бокса
     generateSlug(name) {
         // Таблица транслитерации
@@ -278,15 +315,37 @@ class FramerCMS {
         }
     }
 
-    // Получить все мероприятия
+    // Получить все мероприятия (с кешированием — один запрос на сессию)
     async getEvents() {
+        if (this._eventsCache) return this._eventsCache;
+
+        if (this.useMockData) return this.getMockEvents();
+
         try {
             const response = await fetch(`${this.baseUrl}categing-api/events`);
-            if (!response.ok) throw new Error('Failed to fetch events');
-            return await response.json();
+            if (!response.ok) throw new Error(`Failed to fetch events: ${response.status} ${response.statusText}`);
+            const data = await response.json();
+
+            if (data && data.error) {
+                console.error('❌ API Error (events):', data.error);
+                return this.getMockEvents();
+            }
+
+            let result;
+            if (typeof data === 'object' && data !== null && !Array.isArray(data)) {
+                result = Object.keys(data).map(key => ({ id: key, ...data[key] }));
+            } else if (!Array.isArray(data)) {
+                console.error('❌ Expected object or array for events but got:', typeof data);
+                return this.getMockEvents();
+            } else {
+                result = data;
+            }
+
+            this._eventsCache = result;
+            return this._eventsCache;
         } catch (error) {
-            console.error('Error fetching events:', error);
-            return [];
+            console.error('❌ Error fetching events:', error);
+            return this.getMockEvents();
         }
     }
 
@@ -754,7 +813,7 @@ if (next && !next.dataset.bound) {
                 if (boxData[photoKey]) {
                     let imageUrl = boxData[photoKey];
                     if (!imageUrl.startsWith('http')) {
-                        imageUrl = `${this.baseUrl}admin/${imageUrl}`;
+                        imageUrl = `${this.baseUrl}${imageUrl}`;
                     }
                     
                     // Ищем фото-элементы только внутри этого контейнера
@@ -910,7 +969,7 @@ if (next && !next.dataset.bound) {
         const applyPhoto = (element, box, photoNumber) => {
             const raw = box[`photo${photoNumber}`];
             if (!raw) return;
-            const imageUrl = raw.startsWith('http') ? raw : `${this.baseUrl}admin/${raw}`;
+            const imageUrl = raw.startsWith('http') ? raw : `${this.baseUrl}${raw}`;
 
             if (element.tagName === 'IMG') {
                 element.src = imageUrl;
@@ -1020,9 +1079,9 @@ if (next && !next.dataset.bound) {
             if (boxData[photoKey]) {
                 let imageUrl = boxData[photoKey];
                 if (!imageUrl.startsWith('http')) {
-                    imageUrl = `${this.baseUrl}admin/${imageUrl}`;
+                    imageUrl = `${this.baseUrl}${imageUrl}`;
                 }
-                
+
                 // Ищем элементы только внутри этого контейнера
                 const elements = boxContainer.querySelectorAll(`[data-framer-name="box-${photoKey}"]`);
         
@@ -1340,7 +1399,7 @@ initBoxTabs();
                 let imageUrl = box[`photo${i}`];
                 if (imageUrl && !imageUrl.startsWith('http')) {
                     // Если путь относительный, добавляем базовый URL
-                    imageUrl = `${this.baseUrl}admin/${imageUrl}`;
+                    imageUrl = `${this.baseUrl}${imageUrl}`;
                 }
                 
                 // Показываем элемент (если он был скрыт ранее)
@@ -1486,104 +1545,273 @@ initBoxTabs();
 
     }
 
-    // Заполнить элементы мероприятий на странице
+    // Заполнить элементы мероприятий на странице (с поддержкой слайдера)
     async populateEvents(containerName, templateName) {
-        const events = await this.getEvents();
         const container = document.querySelector(`[data-framer-name="${containerName}"]`);
         const template = document.querySelector(`[data-framer-name="${templateName}"]`);
-        
+
         if (!container || !template) {
-            console.error('Container or template not found:', containerName, templateName);
+            console.error('❌ Events container or template not found:', containerName, templateName);
+            return;
+        }
+
+        if (template.style.display !== 'none') {
+            template.style.display = 'none';
+        }
+
+        const events = await this.getEvents();
+
+        if (!Array.isArray(events) || events.length === 0) {
+            console.error('❌ No events to render');
             return;
         }
 
         // Очищаем контейнер, кроме шаблона
-        const children = Array.from(container.children);
-        children.forEach(child => {
+        Array.from(container.children).forEach(child => {
             if (child !== template && !child.hasAttribute('data-framer-name')) {
                 child.remove();
             }
         });
 
-        // Создаем элементы для каждого мероприятия
+        // Создаём карточку для каждого ивента
         events.forEach((event, index) => {
             const eventElement = template.cloneNode(true);
-            eventElement.style.display = ''; // Показываем элемент
-            eventElement.removeAttribute('data-framer-name'); // Убираем имя шаблона
-            eventElement.setAttribute('data-event-id', event.id); // Добавляем ID для идентификации
-            
-            // Заполняем данные
+            eventElement.removeAttribute('data-framer-name');
+            eventElement.setAttribute('data-event-id', event.id);
+            eventElement.setAttribute('data-event-index', index); // 0-based для postMessage → iframe
+            eventElement.style.display = '';
             this.fillEventData(eventElement, event);
-            
-            // Добавляем в контейнер
             container.appendChild(eventElement);
         });
 
-        // Скрываем шаблон
+        // Скрываем шаблон и показываем контейнер
         template.style.display = 'none';
+        container.style.display = '';
+        container.style.visibility = 'visible';
+        container.style.opacity = '1';
+
+        // ── Слайдер: вспомогательные функции ──────────────────────────────────
+        const findScrollableX = (el) => {
+            let cur = el;
+            while (cur && cur !== document.body) {
+                const canScroll = cur.scrollWidth > cur.clientWidth + 2;
+                const overflowX = getComputedStyle(cur).overflowX;
+                if (canScroll && (overflowX === 'auto' || overflowX === 'scroll')) return cur;
+                cur = cur.parentElement;
+            }
+            return el;
+        };
+
+        const injectEventsScrollbarStyle = () => {
+            if (document.getElementById('hide-scrollbar-style')) return;
+            const st = document.createElement('style');
+            st.id = 'hide-scrollbar-style';
+            st.textContent = `
+                .hide-scrollbar::-webkit-scrollbar { display: none; }
+                .hide-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+            `;
+            document.head.appendChild(st);
+        };
+
+        const makeEventsSlider = (scroller) => {
+            Object.assign(scroller.style, {
+                display: 'flex',
+                flexWrap: 'nowrap',
+                gap: '16px',
+                overflowX: 'auto',
+                overflowY: 'hidden',
+                scrollSnapType: 'x mandatory',
+                WebkitOverflowScrolling: 'touch',
+            });
+            scroller.classList.add('hide-scrollbar');
+        };
+
+        const styleEventCard = (el) => {
+            Object.assign(el.style, {
+                flex: '0 0 320px',
+                width: '320px',
+                height: '480px',
+                maxWidth: '85vw',
+                scrollSnapAlign: 'center',
+                position: 'relative',
+                overflow: 'hidden',
+                flexShrink: '0',
+            });
+        };
+
+        // ── Применяем стили слайдера ───────────────────────────────────────────
+        injectEventsScrollbarStyle();
+        makeEventsSlider(container);
+
+        Array.from(container.children).forEach((child) => {
+            if (child === template) return;
+            styleEventCard(child);
+        });
+
+        const scroller = findScrollableX(container);
+
+        // ── Кнопки prev / next ─────────────────────────────────────────────────
+        const prev = document.querySelector('[data-framer-name="events-prev"]');
+        const next = document.querySelector('[data-framer-name="events-next"]');
+
+        const getStep = () => {
+            const first = Array.from(container.children).find(ch => ch !== template);
+            if (!first) return 280 + 16;
+            return first.getBoundingClientRect().width + 16;
+        };
+
+        if (prev && !prev.dataset.eventsBound) {
+            prev.dataset.eventsBound = '1';
+            prev.addEventListener('click', (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                scroller.scrollBy({ left: -getStep(), behavior: 'smooth' });
+            });
+        }
+        if (next && !next.dataset.eventsBound) {
+            next.dataset.eventsBound = '1';
+            next.addEventListener('click', (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                scroller.scrollBy({ left: getStep(), behavior: 'smooth' });
+            });
+        }
     }
 
     // Заполнить данные конкретного мероприятия
     fillEventData(container, event) {
-        // Функция для поиска элемента по data-framer-name в контейнере
-        const findElement = (name) => {
-            return container.querySelector(`[data-framer-name="${name}"]`);
+        const findElement = (name) => container.querySelector(`[data-framer-name="${name}"]`);
+
+        // Безопасная замена текста с сохранением framer-стилей (идентично fillBoxData)
+        const setTextContent = (element, text) => {
+            if (!element) return;
+            const textEl = element.querySelector('p.framer-text') ||
+                           element.querySelector('p[style*="framer-font"]') ||
+                           element.querySelector('p') ||
+                           element.querySelector('[class*="framer-text"]') ||
+                           element.querySelector('span.framer-text') ||
+                           element.querySelector('div.framer-text');
+            if (textEl) {
+                textEl.textContent = text;
+            } else {
+                element.textContent = text;
+            }
         };
 
-        const upperElement = findElement('event-upper') || findElement('upper');
-        if (upperElement) upperElement.textContent = event.upper || '';
+        // ── Текстовые поля ─────────────────────────────────────────────────────
+        // upper = "Конференция", lower = "INTRA-TECH" — два отдельных элемента
+        const upperEl = findElement('event-upper');
+        setTextContent(upperEl, event.upper || '');
 
-        const lowerElement = findElement('event-lower') || findElement('lower');
-        if (lowerElement) lowerElement.textContent = event.lower || '';
+        const lowerEl = findElement('event-lower');
+        setTextContent(lowerEl, event.lower || '');
 
-        const quantityElement = findElement('event-quantity') || findElement('quantity');
-        if (quantityElement) quantityElement.textContent = event.quantity ? `${event.quantity} гостей` : '';
+        const quantityEl = findElement('event-quantity');
+        setTextContent(quantityEl, event.quantity ? `${event.quantity} персон` : '');
 
-        // Заполняем фотографии
-        if (event.photos && event.photos.length > 0) {
-            const mainPhotoElement = findElement('event-main-photo') || findElement('main-photo');
-            if (mainPhotoElement) {
-                if (mainPhotoElement.tagName === 'IMG') {
-                    mainPhotoElement.src = event.photos[0];
-                    mainPhotoElement.alt = event.upper || '';
+        // ── Фото ───────────────────────────────────────────────────────────────
+        // API возвращает photos[] с относительными путями вида "uploads/xxx.jpg"
+        // Полный URL: baseUrl + path (без "admin/")
+        const rawUrl = event.photo || (Array.isArray(event.photos) && event.photos[0]) || null;
+
+        if (rawUrl) {
+            const imageUrl = rawUrl.startsWith('http') ? rawUrl : `${this.baseUrl}${rawUrl}`;
+
+            const applyPhoto = (el) => {
+                if (!el) return;
+                if (el.tagName === 'IMG') {
+                    el.src = imageUrl;
+                    el.srcset = '';
+                    el.removeAttribute('srcset');
+                    el.alt = event.upper || '';
                 } else {
-                    mainPhotoElement.style.backgroundImage = `url(${event.photos[0]})`;
-                    mainPhotoElement.style.backgroundSize = 'cover';
-                    mainPhotoElement.style.backgroundPosition = 'center';
+                    el.style.backgroundImage = `url(${imageUrl})`;
+                    el.style.backgroundSize = 'cover';
+                    el.style.backgroundPosition = 'center';
                 }
-            }
-
-            // Галерея фотографий
-            const galleryElement = findElement('event-photo-gallery') || findElement('photo-gallery');
-            if (galleryElement) {
-                galleryElement.innerHTML = '';
-                event.photos.forEach(photo => {
-                    const img = document.createElement('img');
-                    img.src = photo;
+                // Вложенные img — сбрасываем srcset и sizes чтобы браузер не игнорировал src
+                el.querySelectorAll('img').forEach(img => {
+                    img.removeAttribute('srcset');
+                    img.removeAttribute('sizes');
+                    img.src = imageUrl;
                     img.alt = event.upper || '';
-                    img.style.cssText = 'width: 100%; height: 100%; object-fit: cover;';
-                    galleryElement.appendChild(img);
                 });
-            }
+                // Framer background-image wrappers
+                el.querySelectorAll('[data-framer-background-image-wrapper="true"]').forEach(w => {
+                    w.style.backgroundImage = `url(${imageUrl})`;
+                    w.style.backgroundSize = 'cover';
+                    w.style.backgroundPosition = 'center center';
+                });
+            };
+
+            applyPhoto(
+                findElement('event-image') ||
+                findElement('event-photo') ||
+                findElement('event-main-photo')
+            );
         }
 
-        // Обновляем ссылки
-        const linkElements = container.querySelectorAll('[data-framer-name*="event-link"]');
-        linkElements.forEach(link => {
-            if (link.tagName === 'A') {
-                const currentHref = link.getAttribute('href') || '';
-                link.setAttribute('href', `${currentHref}${currentHref.includes('?') ? '&' : '?'}id=${event.id}`);
-            }
-            // Для div элементов добавляем обработчик клика
-            if (link.tagName === 'DIV') {
-                link.style.cursor = 'pointer';
-                link.onclick = () => {
-                    window.location.href = `/event-details?id=${event.id}`;
-                };
-            }
-        });
-    }
+        // ── Визуальные стили карточки ───────────────────────────────────────────
 
+        // 1. Тёмный блюр за бейджем (event-quantity → его родитель-пилюля)
+        const badgePill = findElement('event-quantity')?.parentElement;
+        if (badgePill) {
+            Object.assign(badgePill.style, {
+                backdropFilter: 'blur(12px)',
+                WebkitBackdropFilter: 'blur(12px)',
+                backgroundColor: 'rgba(0, 0, 0, 0.05)',
+            });
+        }
+
+        // 2. Отступы и gap нижнего текстового блока
+        const upperEl2 = findElement('event-upper');
+        if (upperEl2) {
+            const contentFrame = upperEl2.parentElement;
+            if (contentFrame) {
+                Object.assign(contentFrame.style, {
+                    padding: '0 20px 20px',
+                    boxSizing: 'border-box',
+                });
+            }
+            upperEl2.style.marginBottom = '4px';
+        }
+        const lowerEl2 = findElement('event-lower');
+        if (lowerEl2) lowerEl2.style.marginBottom = '12px';
+
+        // 3. Стрелка + клик → галерея
+        const linkEl = findElement('event-link');
+        if (linkEl) {
+            // Текст со стрелкой
+            const linkTextNode = linkEl.querySelector('p.framer-text') ||
+                                 linkEl.querySelector('p') ||
+                                 linkEl.querySelector('span') ||
+                                 linkEl;
+            if (linkTextNode && !linkTextNode.textContent.includes('›')) {
+                linkTextNode.textContent = (linkTextNode.textContent.trim() || 'Смотреть фото') + ' ›';
+            }
+            // Клик → postMessage в iframe карусели
+            const openGallery = (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                // Индекс берём с карточки (установлен в populateEvents)
+                const card = linkEl.closest('[data-event-index]');
+                const idx = card ? parseInt(card.getAttribute('data-event-index'), 10) : 0;
+                const iframe = document.getElementById('events-carousel-iframe');
+                if (iframe && iframe.contentWindow) {
+                    iframe.contentWindow.postMessage({ type: 'openEventGallery', storyIndex: idx }, '*');
+                }
+            };
+            linkEl.style.cursor = 'pointer';
+            linkEl.style.pointerEvents = 'auto';
+            linkEl.addEventListener('click', openGallery);
+            // Родительский Stack тоже (Framer перехватывает события)
+            if (linkEl.parentElement) {
+                linkEl.parentElement.style.cursor = 'pointer';
+                linkEl.parentElement.style.pointerEvents = 'auto';
+                linkEl.parentElement.addEventListener('click', openGallery);
+            }
+        }
+    }
     // Заполнить данные на детальной странице бокса по slug
     async populateBoxDetailsBySlug(slug) {
 
@@ -2554,7 +2782,7 @@ class CartManager {
         if (imageElement && box.photo1) {
             let imageUrl = box.photo1;
             if (!imageUrl.startsWith('http')) {
-                imageUrl = `${window.cms.baseUrl}admin/${imageUrl}`;
+                imageUrl = `${window.cms.baseUrl}${imageUrl}`;
             }
             
             // Находим img элемент внутри wrapper'а
@@ -2979,6 +3207,31 @@ const handlePageChange = () => {
         });
     }, 100);
 };
+
+// ── Галерея: управление iframe через postMessage (cross-origin safe) ─────────
+window.addEventListener('message', (e) => {
+    if (!e.data || !e.data.type) return;
+    const iframe = document.getElementById('events-carousel-iframe');
+    if (!iframe) return;
+
+    if (e.data.type === 'galleryOpen') {
+        Object.assign(iframe.style, {
+            position: 'fixed',
+            top: '0', left: '0',
+            width: '100vw', height: '100vh',
+            opacity: '1',
+            pointerEvents: 'auto',
+            zIndex: '99999',
+        });
+    } else if (e.data.type === 'galleryClose') {
+        Object.assign(iframe.style, {
+            width: '1px', height: '1px',
+            opacity: '0',
+            pointerEvents: 'none',
+            zIndex: '-1',
+        });
+    }
+});
 
 // ── Единая точка запуска ────────────────────────────────────────────────────
 const runAutoInit = () => cms.autoInit().catch(err => console.error('❌ AutoInit error:', err));

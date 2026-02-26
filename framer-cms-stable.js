@@ -638,7 +638,7 @@ if (next && !next.dataset.bound) {
                 if (boxData[photoKey]) {
                     let imageUrl = boxData[photoKey];
                     if (!imageUrl.startsWith('http')) {
-                        imageUrl = `${this.baseUrl}admin/${imageUrl}`;
+                        imageUrl = `${this.baseUrl}${imageUrl}`;
                     }
                     
                     // Ищем фото-элементы только внутри этого контейнера
@@ -810,7 +810,7 @@ if (next && !next.dataset.bound) {
             if (currentBox && currentBox[`photo${photoNumber}`]) {
                 let imageUrl = currentBox[`photo${photoNumber}`];
                 if (!imageUrl.startsWith('http')) {
-                    imageUrl = `${this.baseUrl}admin/${imageUrl}`;
+                    imageUrl = `${this.baseUrl}${imageUrl}`;
                 }
                 
         
@@ -919,7 +919,7 @@ if (next && !next.dataset.bound) {
             if (boxData[photoKey]) {
                 let imageUrl = boxData[photoKey];
                 if (!imageUrl.startsWith('http')) {
-                    imageUrl = `${this.baseUrl}admin/${imageUrl}`;
+                    imageUrl = `${this.baseUrl}${imageUrl}`;
                 }
                 
                 // Ищем элементы только внутри этого контейнера
@@ -1239,7 +1239,7 @@ initBoxTabs();
                 let imageUrl = box[`photo${i}`];
                 if (imageUrl && !imageUrl.startsWith('http')) {
                     // Если путь относительный, добавляем базовый URL
-                    imageUrl = `${this.baseUrl}admin/${imageUrl}`;
+                    imageUrl = `${this.baseUrl}${imageUrl}`;
                 }
                 
                 // Показываем элемент (если он был скрыт ранее)
@@ -2325,7 +2325,7 @@ class CartManager {
         if (imageElement && box.photo1) {
             let imageUrl = box.photo1;
             if (!imageUrl.startsWith('http')) {
-                imageUrl = `${window.cms.baseUrl}admin/${imageUrl}`;
+                imageUrl = `${window.cms.baseUrl}${imageUrl}`;
             }
             
             // Находим img элемент внутри wrapper'а

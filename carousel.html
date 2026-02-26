@@ -207,62 +207,10 @@
               currentStoryIndex = idx;
               currentInnerIndex = 0;
               resetStyles();
-              
-              // Move modal to parent document
-              const parentBody = window.parent.document.body;
-              if (!parentBody.contains(modal)) {
-                // Copy all necessary styles to parent document
-                const styles = Array.from(document.styleSheets).map(sheet => {
-                  try {
-                    return Array.from(sheet.cssRules)
-                      .map(rule => rule.cssText)
-                      .join('\n');
-                  } catch (e) {
-                    // Пропускаем внешние таблицы стилей из-за CORS
-                    return '';
-                  }
-                }).join('\n');
 
-                const styleElement = window.parent.document.createElement('style');
-                styleElement.setAttribute('data-from-iframe', 'true');
-                styleElement.textContent = styles;
-                window.parent.document.head.appendChild(styleElement);
+              // Просим родителя сделать iframe full-screen (cross-origin safe)
+              window.parent.postMessage({ type: 'galleryOpen' }, '*');
 
-                // Копируем необходимые ссылки на шрифты и стили
-                const fontLinks = document.querySelectorAll('link[rel="preconnect"], link[href*="fonts.googleapis"]');
-                fontLinks.forEach(link => {
-                  if (!window.parent.document.querySelector(`link[href="${link.href}"]`)) {
-                    const newLink = window.parent.document.createElement('link');
-                    Array.from(link.attributes).forEach(attr => {
-                      newLink.setAttribute(attr.name, attr.value);
-                    });
-                    window.parent.document.head.appendChild(newLink);
-                  }
-                });
-
-                // Добавляем модальное окно в родительский документ
-                parentBody.appendChild(modal);
-
-                // Ensure modal is positioned correctly in parent window
-                Object.assign(modal.style, {
-                  position: 'fixed',
-                  top: '0',
-                  left: '0',
-                  width: '100%',
-                  height: '100%',
-                  zIndex: '9999'
-                });
-
-                // Добавляем Swiper стили если они нужны
-                if (!window.parent.document.querySelector('link[href*="swiper"]')) {
-                  const swiperStyle = document.querySelector('link[href*="swiper"]');
-                  if (swiperStyle) {
-                    const newSwiperStyle = swiperStyle.cloneNode(true);
-                    window.parent.document.head.appendChild(newSwiperStyle);
-                  }
-                }
-              }
-              
               modal.style.display = "flex";
               navWrapper.style.opacity = "1";
               updateSlidesStyle();
@@ -576,19 +524,25 @@
               goPrev();
             });
 
-            btnClose.addEventListener("click", () => {
+            const closeModal = () => {
               clearTimeout(autoProgressTimeout);
               modal.style.display = "none";
-              // Return modal back to iframe when closed
-              if (window.parent.document.body.contains(modal)) {
-                document.querySelector('.eventsmodalwindowswrapper').appendChild(modal);
-                
-                // Удаляем добавленные стили и ссылки из родительского документа
-                window.parent.document.querySelectorAll('style[data-from-iframe]').forEach(style => {
-                  style.remove();
-                });
-              }
-            });
+              window.parent.postMessage({ type: 'galleryClose' }, '*');
+            };
+
+            btnClose.addEventListener("click", closeModal);
+
+            // Клик по фону (снаружи карточек) тоже закрывает
+            modal.querySelector(".eventsmodalbackground").addEventListener("click", closeModal);
+          // ── postMessage от родительской страницы (Framer) ─────────────────
+          window.addEventListener('message', (e) => {
+            if (!e.data || e.data.type !== 'openEventGallery') return;
+            const idx = typeof e.data.storyIndex === 'number'
+              ? Math.max(0, Math.min(e.data.storyIndex, storySlides.length - 1))
+              : 0;
+            openStory(idx);
+          });
+
           }, 100); // Задержка 100мс для обновления DOM
         }); // cardsReady
       }); // DOMContentLoaded

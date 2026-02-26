@@ -1,7 +1,7 @@
 document.addEventListener("DOMContentLoaded", async () => {
   const eventsWrapper = document.querySelector(".swiper-wrapper.events");
   const storiesWrapper = document.querySelector(".swiper-wrapper.stories");
-  
+
   const templateEventSlide = document.querySelector(".swiper-slide.events");
   const templateStorySlide = document.querySelector(".swiper-slide.story-slide");
   const innerSlideTemplate = templateStorySlide.querySelector(".swiper-slide.inner-slide");
@@ -11,15 +11,27 @@ document.addEventListener("DOMContentLoaded", async () => {
   templateStorySlide.remove();
 
   try {
-    const response = await fetch("/admin/events.json");
-    const data = await response.json();
+    const response = await fetch("/categing-api/events");
 
-    Object.entries(data).forEach(([id, item], index) => {
-      const eventId = String(index + 1);
+    if (!response.ok) {
+      console.error("Ошибка загрузки событий:", response.status, response.statusText);
+      return; // cardsReady НЕ диспатчим — нет данных
+    }
+
+    const data = await response.json();
+    const entries = Object.entries(data);
+
+    if (!entries.length) {
+      console.warn("Нет событий для отображения");
+      return;
+    }
+
+    entries.forEach(([, item], index) => {
+      const eventId = String(index); // 0-based — совпадает с data-event-index в framer-cms.js
       const firstPhoto = item.photos?.[0];
       if (!firstPhoto) return;
 
-      const firstPhotoUrl = `/admin/${firstPhoto}`;
+      const firstPhotoUrl = `/${firstPhoto}`; // uploads/xxx.jpg → /uploads/xxx.jpg
 
       // ----- EVENTS SLIDE -----
       const eventSlide = templateEventSlide.cloneNode(true);
@@ -42,7 +54,6 @@ document.addEventListener("DOMContentLoaded", async () => {
       inDiv.textContent = eventId;
       inDiv.setAttribute("eventid-in", eventId);
 
-      // Обновляем внутреннее содержимое story slide
       storySlide.querySelector("#quantity").textContent = item.quantity || "";
       storySlide.querySelector("#uppertext").textContent = item.upper || "";
       storySlide.querySelector("#lowertext").textContent = item.lower || "";
@@ -52,7 +63,7 @@ document.addEventListener("DOMContentLoaded", async () => {
 
       item.photos.forEach((photo) => {
         const innerSlide = innerSlideTemplate.cloneNode(true);
-        const photoUrl = `/admin/${photo}`;
+        const photoUrl = `/${photo}`;
         innerSlide.style.backgroundImage = `url('${photoUrl}')`;
         innerSwiperWrapper.appendChild(innerSlide);
       });
@@ -61,7 +72,9 @@ document.addEventListener("DOMContentLoaded", async () => {
     });
 
     document.dispatchEvent(new Event("cardsReady"));
+
   } catch (err) {
     console.error("Ошибка загрузки данных:", err);
+    // cardsReady НЕ диспатчим при ошибке
   }
 });
